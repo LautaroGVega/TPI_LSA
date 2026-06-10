@@ -1,13 +1,13 @@
 """
-PASO 1 — Captura de muestras (todas las letras en una sola sesión)
--------------------------------------------------------------------
-Presionás la tecla de la letra que estás mostrando y captura sola.
-Presionás ESPACIO para pausar/reanudar.
-Presionás 0 para capturar la clase NADA (mano neutra).
-Presionás Q para guardar y salir.
-
-IMPORTANTE: el vector se guarda NORMALIZADO (invariante a posición y tamaño).
-La misma función debe estar en 3_probar.py.
+Captura de muestras — todas las letras + NADA + ESPACIO + FINALIZAR
+---------------------------------------------------------------------
+Controles:
+  Tecla letra  → activa captura de esa letra (A-Z)
+  Tecla 0      → captura clase NADA
+  Tecla 1      → captura clase ESPACIO
+  Tecla 2      → captura clase FINALIZAR
+  ESPACIO      → pausar / reanudar
+  Q            → guardar y salir
 """
 
 import csv
@@ -24,32 +24,25 @@ DATASET_CSV = "dataset.csv"
 CONEXIONES  = mp.tasks.vision.HandLandmarksConnections.HAND_CONNECTIONS
 INTERVALO   = 0.25
 
-LETRAS_VALIDAS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0")
+LETRAS_VALIDAS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ012")
+
+TECLAS_ESPECIALES = {
+    "0": "NADA",
+    "1": "ESPACIO",
+    "2": "FINALIZAR",
+}
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  FUNCIÓN CRÍTICA — debe ser idéntica en 1_capturar.py y 3_probar.py
-# ═══════════════════════════════════════════════════════════════════════════
 def extraer_vector(landmarks) -> list[float]:
-    """
-    Devuelve un vector de 63 valores normalizados:
-      1. Invariancia de traslación: se resta la muñeca (landmark 0).
-      2. Invariancia de escala: se divide por la distancia muñeca → base del
-         dedo medio (landmark 9).
-    Así el modelo aprende solo la FORMA de la mano, no su posición en
-    pantalla ni su tamaño aparente.
-    """
     muneca = landmarks[0]
     base_medio = landmarks[9]
-
     distancia = math.sqrt(
         (base_medio.x - muneca.x) ** 2 +
         (base_medio.y - muneca.y) ** 2 +
         (base_medio.z - muneca.z) ** 2
     )
     if distancia == 0:
-        distancia = 1.0   # evitar división por cero en casos raros
-
+        distancia = 1.0
     vector = []
     for lm in landmarks:
         rel_x = (lm.x - muneca.x) / distancia
@@ -57,7 +50,6 @@ def extraer_vector(landmarks) -> list[float]:
         rel_z = (lm.z - muneca.z) / distancia
         vector.extend([round(rel_x, 4), round(rel_y, 4), round(rel_z, 4)])
     return vector
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def crear_detector():
@@ -92,14 +84,16 @@ def cargar_conteos():
 
 
 def main():
-    print("=" * 52)
+    print("=" * 56)
     print("  Captura de dataset LSA (vector normalizado)")
-    print("=" * 52)
+    print("=" * 56)
     print("  Tecla letra  → activa captura de esa letra")
-    print("  Tecla 0      → captura clase NADA")
+    print("  Tecla 0      → NADA")
+    print("  Tecla 1      → ESPACIO")
+    print("  Tecla 2      → FINALIZAR")
     print("  ESPACIO      → pausar / reanudar")
     print("  Q            → guardar y salir")
-    print("=" * 52)
+    print("=" * 56)
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -130,7 +124,6 @@ def main():
                 dibujar_mano(frame, landmarks)
                 vector = extraer_vector(landmarks)
 
-            # Captura automática
             ahora = time.time()
             if (capturando and letra_activa and mano_detectada
                     and (ahora - ultimo_cap) >= INTERVALO):
@@ -140,7 +133,6 @@ def main():
                 conteos[letra_activa] = conteos.get(letra_activa, 0) + 1
                 sesion[letra_activa]  = sesion.get(letra_activa, 0) + 1
 
-            # HUD
             h_frame = frame.shape[0]
             overlay = frame.copy()
             cv2.rectangle(overlay, (0, 0), (frame.shape[1], 115), (0, 0, 0), -1)
@@ -168,30 +160,28 @@ def main():
             resumen = "  ".join(f"{k}:{v}" for k, v in sorted(conteos.items()))
             cv2.putText(frame, resumen, (10, h_frame - 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
-            cv2.putText(frame, "Letra=activar  ESPACIO=pausar  Q=salir",
+            cv2.putText(frame, "0=NADA 1=ESPACIO 2=FINALIZAR  ESPACIO=pausar  Q=salir",
                         (10, h_frame - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (120, 120, 120), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (120, 120, 120), 1)
 
             cv2.imshow("Captura LSA", frame)
 
-            # Teclado
             tecla = cv2.waitKey(1) & 0xFF
             if tecla == ord("q"):
                 break
             elif tecla == ord(" "):
                 if letra_activa:
                     capturando = not capturando
-                    print(f"  {'REANUDADO' if capturando else 'PAUSADO'} — {letra_activa}")
             elif tecla != 255:
                 char = chr(tecla).upper()
                 if char in LETRAS_VALIDAS:
-                    nueva_letra = "NADA" if char == "0" else char
+                    nueva_letra = TECLAS_ESPECIALES.get(char, char)
                     if nueva_letra != letra_activa:
                         letra_activa = nueva_letra
                         capturando   = True
                         ultimo_cap   = 0.0
                         print(f"\n  ── Letra activa: {letra_activa} "
-                              f"(ya guardadas: {conteos.get(letra_activa, 0)}) ──")
+                              f"(guardadas: {conteos.get(letra_activa, 0)}) ──")
 
     cap.release()
     cv2.destroyAllWindows()

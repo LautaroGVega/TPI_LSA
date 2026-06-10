@@ -1,36 +1,41 @@
 """
-PASO 3 — Prueba en tiempo real
---------------------------------
-Carga el modelo entrenado y predice en tiempo real con la cámara.
+Prueba en tiempo real — TensorFlow / Keras
+--------------------------------------------
+Carga el modelo .keras y predice con la cámara en vivo.
 
-IMPORTANTE: usa exactamente la MISMA función extraer_vector() que
-1_capturar.py. Si las dos no son idénticas, el modelo no funciona.
+Archivos necesarios en la misma carpeta:
+  - hand_landmarker.task
+  - modelo_lsa.keras
+  - preproceso.pkl
+
+Uso:
+  py -3.12 probar.py
+
+Controles:
+  Q → salir
 """
 
 import math
 import pickle
+import sys
 import cv2
 import numpy as np
+import tensorflow as tf
 import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
-MODEL_PATH  = "hand_landmarker.task"
-MODELO_PATH = "modelo_lsa.pkl"
+HAND_MODEL  = "hand_landmarker.task"
+MODELO_PATH = "modelo_lsa.keras"
+PREPROCESO  = "preproceso.pkl"
 CONEXIONES  = mp.tasks.vision.HandLandmarksConnections.HAND_CONNECTIONS
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  FUNCIÓN CRÍTICA — debe ser idéntica en 1_capturar.py y 3_probar.py
+#  FUNCIÓN CRÍTICA — idéntica a capturar.py
 # ═══════════════════════════════════════════════════════════════════════════
 def extraer_vector(landmarks) -> list[float]:
-    """
-    Devuelve un vector de 63 valores normalizados:
-      1. Invariancia de traslación: se resta la muñeca (landmark 0).
-      2. Invariancia de escala: se divide por la distancia muñeca → base del
-         dedo medio (landmark 9).
-    """
-    muneca = landmarks[0]
+    muneca     = landmarks[0]
     base_medio = landmarks[9]
 
     distancia = math.sqrt(
@@ -53,7 +58,7 @@ def extraer_vector(landmarks) -> list[float]:
 
 def crear_detector():
     opciones = mp_vision.HandLandmarkerOptions(
-        base_options=mp_python.BaseOptions(model_asset_path=MODEL_PATH),
+        base_options=mp_python.BaseOptions(model_asset_path=HAND_MODEL),
         running_mode=mp_vision.RunningMode.IMAGE,
         num_hands=1,
         min_hand_detection_confidence=0.7,
@@ -72,22 +77,31 @@ def dibujar_mano(frame, landmarks):
 
 
 def main():
+    # ── Cargar modelo y preprocesamiento ──────────────────────────────────
     try:
-        with open(MODELO_PATH, "rb") as f:
+        modelo = tf.keras.models.load_model(MODELO_PATH)
+        print(f"[INFO] Modelo cargado: {MODELO_PATH}")
+    except Exception as e:
+        print(f"[ERROR] No se pudo cargar {MODELO_PATH}: {e}")
+        sys.exit(1)
+
+    try:
+        with open(PREPROCESO, "rb") as f:
             datos = pickle.load(f)
-        modelo  = datos["modelo"]
-        encoder = datos["encoder"]
+        scaler = datos["scaler"]
+        clases = datos["clases"]
+        print(f"[INFO] Clases del modelo: {list(clases)}")
     except FileNotFoundError:
-        print(f"[ERROR] No se encontró {MODELO_PATH}. Ejecutá primero 2_entrenar.py")
-        return
+        print(f"[ERROR] No se encontró {PREPROCESO}")
+        sys.exit(1)
 
-    print(f"[INFO] Clases del modelo: {list(encoder.classes_)}")
-    print("[INFO] Cámara iniciada. Presioná Q para salir.")
-
+    # ── Cámara ────────────────────────────────────────────────────────────
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("[ERROR] No se encontró cámara.")
-        return
+        sys.exit(1)
+
+    print("[INFO] Cámara iniciada. Presioná Q para salir.")
 
     HISTORIAL_MAX = 10
     historial     = []
@@ -111,22 +125,27 @@ def main():
                 dibujar_mano(frame, landmarks)
                 vector = extraer_vector(landmarks)
 
-                proba = modelo.predict_proba([vector])[0]
+                # Normalizar con el mismo scaler del entrenamiento
+                vector_scaled = scaler.transform([vector])
+
+                # Predecir
+                proba = modelo.predict(vector_scaled, verbose=0)[0]
                 idx   = np.argmax(proba)
                 conf  = proba[idx]
 
+                # Suavizado: historial de últimas N predicciones
                 historial.append(idx)
                 if len(historial) > HISTORIAL_MAX:
                     historial.pop(0)
 
                 idx_suave   = max(set(historial), key=historial.count)
-                prediccion  = encoder.classes_[idx_suave]
+                prediccion  = clases[idx_suave]
                 confianza   = conf
                 color_texto = (0, 220, 0) if confianza >= 0.85 else (0, 180, 220)
             else:
                 historial.clear()
 
-            # HUD
+            # ── HUD ───────────────────────────────────────────────────────
             overlay = frame.copy()
             cv2.rectangle(overlay, (0, 0), (frame.shape[1], 100), (0, 0, 0), -1)
             cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
@@ -145,7 +164,7 @@ def main():
             cv2.putText(frame, "Q = salir", (10, frame.shape[0] - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 160, 160), 1)
 
-            cv2.imshow("LSA — predicción en tiempo real", frame)
+            cv2.imshow("LSA — prediccion en tiempo real", frame)
 
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
