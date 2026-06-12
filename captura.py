@@ -9,7 +9,7 @@ Controles:
   Tecla letra  → captura esa letra (A-Z)
   Tecla 0      → NADA
   Tecla 1      → ESPACIO
-  Tecla 2      → FINALIZAR
+  Tecla 2      → FINALIZAR 
   ESPACIO      → pausar / reanudar
   Q            → guardar y salir
 
@@ -36,7 +36,7 @@ DATASET_CSV = "dataset.csv"
 CONEXIONES  = mp.tasks.vision.HandLandmarksConnections.HAND_CONNECTIONS
 INTERVALO   = 0.25
 
-LETRAS_VALIDAS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ012")
+LETRAS_VALIDAS = set("ABCDEFGHIJKLMNÑOPQRSTUVWXYZ012")
 TECLAS_ESPECIALES = {
     "0": "NADA",
     "1": "ESPACIO",
