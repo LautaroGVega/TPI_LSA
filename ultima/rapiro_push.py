@@ -30,7 +30,7 @@ async def main(ec2_ip):
     print(f"  Conectando a: {url}")
     print(f"{'='*50}")
 
-    cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+    cap = cv2.VideoCapture(0) #cv2.VideoCapture(0) en ws pero en linuix usar cv2.CAP_V4L2
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Fix: elimina lag del buffer
@@ -55,7 +55,7 @@ async def main(ec2_ip):
 
                     # Comprimir y enviar
                     _, buffer = cv2.imencode(".jpg", frame,
-                                            [cv2.IMWRITE_JPEG_QUALITY, 65])
+                                            [cv2.IMWRITE_JPEG_QUALITY, 55])
                     await ws.send(buffer.tobytes())
 
                     # Recibir respuesta
@@ -107,7 +107,7 @@ async def main(ec2_ip):
                             if os.path.exists(f.name):
                                 os.unlink(f.name)
 
-                    await asyncio.sleep(0.15)
+                    await asyncio.sleep(0.05)
 
         except (websockets.exceptions.ConnectionClosed,
                 ConnectionRefusedError, OSError) as e:
