@@ -271,14 +271,14 @@ def main():
             resumen = "  ".join(f"{k}:{v}" for k, v in sorted(conteos.items()))
             cv2.putText(frame, resumen, (10, h_frame - 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
-            cv2.putText(frame, "0=NADA 1=ESPACIO 2=FIN  ESPACIO=pausar  Q=salir",
+            cv2.putText(frame, "0=NADA 1=ESPACIO 2=FIN  ESPACIO=pausar  ESC=salir",
                         (10, h_frame - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.38, (120, 120, 120), 1)
 
             cv2.imshow("Captura LSA", frame)
 
             tecla = cv2.waitKey(1) & 0xFF
-            if tecla == ord("q"):
+            if tecla == 27:
                 break
             elif tecla == ord(" "):
                 if letra_activa:
