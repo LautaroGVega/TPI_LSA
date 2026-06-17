@@ -13,12 +13,12 @@ import asyncio
 import argparse
 import json
 import os
+import signal
 import tempfile
 import time
 import cv2
 import websockets
 
-# Serial es opcional: si no esta instalado o no hay Rapiro fisico, sigue funcionando
 try:
     import serial
     SERIAL_AVAILABLE = True
@@ -27,13 +27,12 @@ except ImportError:
 
 
 def abrir_serial(puerto):
-    """Intenta abrir el puerto serie del Rapiro. Retorna None si falla."""
     if not SERIAL_AVAILABLE:
         print("[INFO] python3-serial no instalado, sin control de hardware")
         return None
     try:
         robot = serial.Serial(puerto, 57600, timeout=1)
-        time.sleep(0.5)  # esperar a que el puerto se estabilice
+        time.sleep(0.5)
         print(f"[INFO] Puerto serie conectado: {puerto}")
         return robot
     except Exception as e:
@@ -42,14 +41,28 @@ def abrir_serial(puerto):
 
 
 def cmd(robot, comando):
-    """Envia un comando serial al Rapiro con manejo de errores."""
     if robot is None:
         return
     try:
         robot.write(comando.encode() + b"\r")
-        time.sleep(0.05)  # 50ms entre comandos para que el firmware los procese
+        time.sleep(0.05)
     except Exception as e:
         print(f"[WARNING] Error serial: {e}")
+
+
+def resetear_rapiro(robot):
+    """Resetea el Rapiro a posicion inicial con ojos azules.
+    Envia #M0 dos veces con delay para asegurar que el firmware lo procese,
+    ya que si el robot esta en medio de una animacion (#M5), un solo #M0
+    puede no ser suficiente para interrumpirla."""
+    if robot is None:
+        return
+    cmd(robot, "#M0")
+    time.sleep(0.3)
+    cmd(robot, "#M0")
+    time.sleep(0.1)
+    cmd(robot, "#PR000G000B255T003")  # ojos azules = esperando
+    print("[INFO] Rapiro reseteado a posicion inicial")
 
 
 async def main(ec2_ip, serial_port):
@@ -61,8 +74,19 @@ async def main(ec2_ip, serial_port):
 
     # Inicializar Rapiro
     robot = abrir_serial(serial_port)
-    cmd(robot, "#M0")                    # posicion inicial
-    cmd(robot, "#PR000G000B255T005")     # ojos azules = esperando
+
+    # Resetear al iniciar para asegurar estado limpio
+    resetear_rapiro(robot)
+
+    # Resetear tambien al cerrar con Ctrl+C
+    def al_cerrar(sig, frame):
+        print("\n[INFO] Cerrando...")
+        resetear_rapiro(robot)
+        if robot:
+            robot.close()
+        exit(0)
+    signal.signal(signal.SIGINT, al_cerrar)
+    signal.signal(signal.SIGTERM, al_cerrar)
 
     # Inicializar camara
     cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
@@ -82,7 +106,7 @@ async def main(ec2_ip, serial_port):
                 print("[INFO] Conectado al EC2!\n")
                 esperando_audio = False
 
-                # Ojos verdes = conectado a la nube
+                # Ojos verdes = conectado y detectando
                 cmd(robot, "#PR000G255B000T003")
 
                 while True:
@@ -91,18 +115,15 @@ async def main(ec2_ip, serial_port):
                         await asyncio.sleep(0.5)
                         continue
 
-                    # Comprimir y enviar
                     _, buffer = cv2.imencode(".jpg", frame,
                                             [cv2.IMWRITE_JPEG_QUALITY, 55])
                     await ws.send(buffer.tobytes())
 
-                    # Recibir respuesta
                     try:
                         respuesta = await asyncio.wait_for(ws.recv(), timeout=2.0)
                     except asyncio.TimeoutError:
                         continue
 
-                    # JSON = datos de letra
                     if isinstance(respuesta, str):
                         data = json.loads(respuesta)
                         letra      = data.get("letra", "---")
@@ -118,14 +139,13 @@ async def main(ec2_ip, serial_port):
                             print(f"  OK {letra}  ->  \"{texto}\"")
                             if letra == "FINALIZAR":
                                 esperando_audio = True
-                                # Ojos amarillos + movimiento mientras habla
+                                # Ojos amarillos + levantar brazos
                                 cmd(robot, "#PR255G255B000T001")
                                 cmd(robot, "#M5")
                         else:
                             print(f"  [{barra}] {letra} {confianza*100:.0f}%  "
                                   f"Manos:{manos}  Texto: {texto}    ", end="\r")
 
-                    # Binario = audio MP3
                     elif isinstance(respuesta, bytes) and esperando_audio:
                         print(f"\n  Reproduciendo audio...")
                         esperando_audio = False
@@ -145,24 +165,27 @@ async def main(ec2_ip, serial_port):
                             if os.path.exists(f.name):
                                 os.unlink(f.name)
 
-                            # Volver a posicion base + ojos verdes
-                            cmd(robot, "#M0")
-                            cmd(robot, "#PR000G255B000T003")
+                        # RESET: esperar 1.5s despues del audio para que
+                        # se note la transicion, luego volver a estado base
+                        await asyncio.sleep(1.5)
+                        resetear_rapiro(robot)
+                        # Pausa antes de volver a detectar
+                        await asyncio.sleep(0.5)
+                        # Ojos verdes = listo para detectar de nuevo
+                        cmd(robot, "#PR000G255B000T003")
 
                     await asyncio.sleep(0.05)
 
         except (websockets.exceptions.ConnectionClosed,
                 ConnectionRefusedError, OSError) as e:
             print(f"\n[INFO] Conexion perdida: {e}")
-            # Ojos rojos = sin conexion
-            cmd(robot, "#PR255G000B000T005")
+            cmd(robot, "#PR255G000B000T005")  # ojos rojos
             print("[INFO] Reintentando en 3 segundos...")
             await asyncio.sleep(3)
 
     cap.release()
     if robot:
-        cmd(robot, "#M0")
-        cmd(robot, "#PR000G000B000T003")
+        resetear_rapiro(robot)
         robot.close()
 
 
