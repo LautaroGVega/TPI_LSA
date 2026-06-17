@@ -32,7 +32,7 @@ def abrir_serial(puerto):
         return None
     try:
         robot = serial.Serial(puerto, 57600, timeout=1)
-        time.sleep(0.5)
+        time.sleep(0.5)  # unico time.sleep permitido: es ANTES del event loop
         print(f"[INFO] Puerto serie conectado: {puerto}")
         return robot
     except Exception as e:
@@ -40,29 +40,41 @@ def abrir_serial(puerto):
         return None
 
 
-def cmd(robot, comando):
+async def cmd(robot, comando):
+    """Envia un comando serial al Rapiro sin bloquear el event loop."""
     if robot is None:
         return
     try:
         robot.write(comando.encode() + b"\r")
-        time.sleep(0.05)
+        await asyncio.sleep(0.05)  # asyncio.sleep no bloquea
     except Exception as e:
         print(f"[WARNING] Error serial: {e}")
 
 
-def resetear_rapiro(robot):
-    """Resetea el Rapiro a posicion inicial con ojos azules.
-    Envia #M0 dos veces con delay para asegurar que el firmware lo procese,
-    ya que si el robot esta en medio de una animacion (#M5), un solo #M0
-    puede no ser suficiente para interrumpirla."""
+async def resetear_rapiro(robot):
+    """Resetea el Rapiro a posicion inicial sin congelar el sistema.
+    Envia #M0 dos veces porque si el robot esta en medio de una
+    animacion (#M5), un solo #M0 puede no interrumpirla."""
     if robot is None:
         return
-    cmd(robot, "#M0")
-    time.sleep(0.3)
-    cmd(robot, "#M0")
-    time.sleep(0.1)
-    cmd(robot, "#PR000G000B255T003")  # ojos azules = esperando
+    await cmd(robot, "#M0")
+    await asyncio.sleep(0.3)
+    await cmd(robot, "#M0")
+    await asyncio.sleep(0.1)
+    await cmd(robot, "#PR000G000B255T003")  # ojos azules
     print("[INFO] Rapiro reseteado a posicion inicial")
+
+
+def resetear_sync(robot):
+    """Reset sincrono para usar en el handler de Ctrl+C donde
+    no se puede usar await."""
+    if robot is None:
+        return
+    try:
+        robot.write(b"#M0\r")
+        robot.write(b"#PR000G000B000T003\r")
+    except Exception:
+        pass
 
 
 async def main(ec2_ip, serial_port):
@@ -75,13 +87,13 @@ async def main(ec2_ip, serial_port):
     # Inicializar Rapiro
     robot = abrir_serial(serial_port)
 
-    # Resetear al iniciar para asegurar estado limpio
-    resetear_rapiro(robot)
+    # Resetear al iniciar
+    await resetear_rapiro(robot)
 
-    # Resetear tambien al cerrar con Ctrl+C
+    # Resetear al cerrar con Ctrl+C
     def al_cerrar(sig, frame):
         print("\n[INFO] Cerrando...")
-        resetear_rapiro(robot)
+        resetear_sync(robot)
         if robot:
             robot.close()
         exit(0)
@@ -107,7 +119,7 @@ async def main(ec2_ip, serial_port):
                 esperando_audio = False
 
                 # Ojos verdes = conectado y detectando
-                cmd(robot, "#PR000G255B000T003")
+                await cmd(robot, "#PR000G255B000T003")
 
                 while True:
                     ret, frame = cap.read()
@@ -140,8 +152,8 @@ async def main(ec2_ip, serial_port):
                             if letra == "FINALIZAR":
                                 esperando_audio = True
                                 # Ojos amarillos + levantar brazos
-                                cmd(robot, "#PR255G255B000T001")
-                                cmd(robot, "#M5")
+                                await cmd(robot, "#PR255G255B000T001")
+                                await cmd(robot, "#M5")
                         else:
                             print(f"  [{barra}] {letra} {confianza*100:.0f}%  "
                                   f"Manos:{manos}  Texto: {texto}    ", end="\r")
@@ -165,27 +177,27 @@ async def main(ec2_ip, serial_port):
                             if os.path.exists(f.name):
                                 os.unlink(f.name)
 
-                        # RESET: esperar 1.5s despues del audio para que
-                        # se note la transicion, luego volver a estado base
+                        # RESET despues del audio:
+                        # 1.5s de pausa para que se note la transicion
                         await asyncio.sleep(1.5)
-                        resetear_rapiro(robot)
-                        # Pausa antes de volver a detectar
+                        # Bajar brazos + ojos azules
+                        await resetear_rapiro(robot)
+                        # Pausa y volver a modo deteccion
                         await asyncio.sleep(0.5)
-                        # Ojos verdes = listo para detectar de nuevo
-                        cmd(robot, "#PR000G255B000T003")
+                        await cmd(robot, "#PR000G255B000T003")  # ojos verdes
 
                     await asyncio.sleep(0.05)
 
         except (websockets.exceptions.ConnectionClosed,
                 ConnectionRefusedError, OSError) as e:
             print(f"\n[INFO] Conexion perdida: {e}")
-            cmd(robot, "#PR255G000B000T005")  # ojos rojos
+            await cmd(robot, "#PR255G000B000T005")  # ojos rojos
             print("[INFO] Reintentando en 3 segundos...")
             await asyncio.sleep(3)
 
     cap.release()
     if robot:
-        resetear_rapiro(robot)
+        resetear_sync(robot)
         robot.close()
 
 
