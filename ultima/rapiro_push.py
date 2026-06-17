@@ -77,7 +77,7 @@ async def main(ec2_ip, serial_port):
         print("\n[INFO] Cerrando...")
         if robot:
             robot.write(b"#M0\r")
-            robot.write(b"#PR000G000B000T001\r")
+            robot.write(b"#PR000G000B255T001\r")
             robot.close()
         exit(0)
     signal.signal(signal.SIGINT, al_cerrar)
