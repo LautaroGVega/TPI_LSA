@@ -30,7 +30,7 @@ async def main(ec2_ip):
     print(f"  Conectando a: {url}")
     print(f"{'='*50}")
 
-    cap = cv2.VideoCapture(0) #cv2.VideoCapture(0) en ws pero en linuix usar cv2.CAP_V4L2
+    cap = cv2.VideoCapture(0, cv2.CAP_V4L2) #cv2.VideoCapture(0) en ws pero en linuix usar cv2.CAP_V4L2 o sea cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Fix: elimina lag del buffer
